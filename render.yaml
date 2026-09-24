@@ -1,0 +1,25 @@
+# Render Blueprint for the gateway. Optional: you can also create the Web
+# Service by hand in the dashboard with the same commands.
+services:
+  - type: web
+    name: kplc-chatbot-gateway
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.7
+      - key: SESSION_BACKEND_URL
+        value: https://kplc-kaggle-notebook-instance.onrender.com
+      - key: DATASET_BACKEND_URL
+        value: https://dataset-trigger-backend.onrender.com
+      - key: MONGODB_URI
+        sync: false
+      - key: DATASET_TRIGGER_SECRET
+        sync: false
+      - key: ADMIN_TOKEN
+        sync: false
+      - key: ALLOWED_ORIGINS
+        sync: false
