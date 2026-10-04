@@ -16,15 +16,16 @@ isn't, which becomes SessionNotReady here.
     request:  {"texts": ["...", "..."]}
     response: {"embeddings": [[...], [...]]}   # one normalized vector per text
 
-Environment is read at call time so a .env loaded by main.py is honoured.
+Settings are read at call time through app_config.cfg (admin-panel override,
+then env var, then default).
   SESSION_BACKEND_URL
   GENERATE_TIMEOUT_SECONDS   default 150 (covers a cold start + generation)
   EMBED_TIMEOUT_SECONDS      default 150
 """
 
-import os
-
 import requests
+
+from app_config import cfg
 
 
 class ModelClientError(Exception):
@@ -36,7 +37,7 @@ class SessionNotReady(ModelClientError):
 
 
 def _post(path: str, payload: dict, timeout: int) -> dict:
-    base = os.environ.get("SESSION_BACKEND_URL", "").strip().rstrip("/")
+    base = cfg.get_str("SESSION_BACKEND_URL").rstrip("/")
     if not base:
         raise ModelClientError(
             "SESSION_BACKEND_URL is not set. It should be the URL of the session "
@@ -66,7 +67,7 @@ def _post(path: str, payload: dict, timeout: int) -> dict:
 
 
 def generate(system_prompt: str, question: str) -> str:
-    timeout = int(os.environ.get("GENERATE_TIMEOUT_SECONDS", "150"))
+    timeout = cfg.get_int("GENERATE_TIMEOUT_SECONDS", 150)
     data = _post("/generate", {"system_prompt": system_prompt, "question": question}, timeout)
     answer = data.get("answer")
     if not answer:
@@ -77,7 +78,7 @@ def generate(system_prompt: str, question: str) -> str:
 def embed(texts: list[str]) -> list[list[float]]:
     if not texts:
         return []
-    timeout = int(os.environ.get("EMBED_TIMEOUT_SECONDS", "150"))
+    timeout = cfg.get_int("EMBED_TIMEOUT_SECONDS", 150)
     data = _post("/embed", {"texts": texts}, timeout)
     embeddings = data.get("embeddings")
     if not embeddings or len(embeddings) != len(texts):

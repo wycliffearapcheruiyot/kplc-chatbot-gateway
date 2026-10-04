@@ -10,7 +10,8 @@ Thin HTTP clients for the two services this gateway sits in front of:
         Makes sure the model-weights dataset exists on Kaggle, building it
         from Hugging Face when it doesn't.
 
-Environment is read at call time (not import time) so a local .env that
+Settings are read at call time through app_config.cfg: an override saved in the
+admin panel wins, then the real env var, then the default. A local .env that
 main.py loads afterwards is still honoured.
 
   SESSION_BACKEND_URL      e.g. https://kplc-kaggle-notebook-instance.onrender.com
@@ -19,9 +20,9 @@ main.py loads afterwards is still honoured.
   UPSTREAM_TIMEOUT_SECONDS default 90 (free-tier services take 30-60s to wake)
 """
 
-import os
-
 import requests
+
+from app_config import cfg
 
 
 class UpstreamError(Exception):
@@ -29,11 +30,11 @@ class UpstreamError(Exception):
 
 
 def session_backend_url() -> str:
-    return os.environ.get("SESSION_BACKEND_URL", "").strip().rstrip("/")
+    return cfg.get_str("SESSION_BACKEND_URL").rstrip("/")
 
 
 def dataset_backend_url() -> str:
-    return os.environ.get("DATASET_BACKEND_URL", "").strip().rstrip("/")
+    return cfg.get_str("DATASET_BACKEND_URL").rstrip("/")
 
 
 def dataset_gate_enabled() -> bool:
@@ -41,7 +42,7 @@ def dataset_gate_enabled() -> bool:
 
 
 def _timeout() -> int:
-    return int(os.environ.get("UPSTREAM_TIMEOUT_SECONDS", "90"))
+    return cfg.get_int("UPSTREAM_TIMEOUT_SECONDS", 90)
 
 
 def _detail(resp: requests.Response) -> str:
@@ -109,7 +110,7 @@ def session_start() -> dict:
 
 def _dataset_call(method: str, path: str, params=None) -> dict:
     base = dataset_backend_url()
-    secret = os.environ.get("DATASET_TRIGGER_SECRET", "")
+    secret = cfg.get_str("DATASET_TRIGGER_SECRET")
     if not base:
         raise UpstreamError("DATASET_BACKEND_URL is not set.")
     if not secret:

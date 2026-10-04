@@ -88,13 +88,40 @@ memory (or `sessionStorage`), and send it with each request.
 | `PUT /chunks/{id}` `{"text": "..."}` | Save an edit. Clears that chunk's embedding. 404 if unknown id. |
 | `POST /chunks/embed[?force=true]` | (Re-)embed chunks missing an embedding, or all with `force`. Needs a **ready** session: 409 otherwise. Returns `{"embedded": N, "ids": [...]}`. |
 | `GET /chat_logs?limit=50` | Newest conversations first (`limit` 1–500). |
+| `GET /settings` | Every service's environment variables (see below). Secrets are returned in full. |
+| `PUT /settings/{service}` `{"set": {"NAME": "value"}, "reset": ["NAME"]}` | Save overrides / remove them. 422 with a readable `detail` if a value is invalid; 404 for an unknown service. |
 
 Suggested admin flow: after saving a chunk, if `GET /session/status` says
 `ready`, call `POST /chunks/embed` automatically; otherwise show "saved — will
 be searchable after the next embed".
 
+### Environment variables (`/settings`)
+
+Backs the admin panel's **Environment** tab. Services: `gateway`,
+`session-backend`, `dataset-backend`, `kb-builder`, plus read-only reference
+entries `db-infra`, `chatbot-web` and `admin`.
+
+`GET /settings` →
+```json
+{"services": [{"id": "gateway", "label": "Gateway", "description": "...",
+  "env_reported_at": "2026-10-04T12:00:00+00:00",
+  "vars": [{"name": "UPSTREAM_TIMEOUT_SECONDS", "description": "...", "type": "int",
+            "secret": false, "default": "90", "applies": "live", "editable": true,
+            "required": false, "placeholder": null,
+            "override": "120", "has_override": true, "env": "90"}]}]}
+```
+- `override` is what the panel saved (stored in MongoDB, `service_settings`); `env`
+  is what the service itself reported from its real environment (`null` = not set / not reported).
+- A service uses `override` if `has_override`, else its real env var, else the default.
+  An override of `""` is real (e.g. empty `DATASET_BACKEND_URL` switches the dataset check off).
+- `applies`: `live` (service picks it up within ~10 s), `next_session` (used when the next
+  Kaggle session launches) or `build` (read-only: set in Render / Vercel / Netlify and redeploy).
+- Guards: `ALLOWED_ORIGINS` must keep the origin making the request (so the panel can't lock
+  itself out); `ADMIN_TOKEN` must be at least 12 characters. All values are validated by type
+  before anything is written, and a bad value saves nothing.
+
 ## CORS
 The gateway only answers browsers whose origin is listed in `ALLOWED_ORIGINS`
-(exact match, no trailing slash). If a call works from `curl` but fails in the
+(exact match, no trailing slash; editable live from the Environment tab). If a call works from `curl` but fails in the
 browser with a CORS error, the origin is missing there. Vercel preview URLs
 are different origins from the production URL.

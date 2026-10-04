@@ -29,6 +29,8 @@ Endpoints (see API.md for request/response shapes):
     PUT  /chunks/{chunk_id}
     POST /chunks/embed
     GET  /chat_logs
+    GET  /settings            every service's environment variables
+    PUT  /settings/{service}  edit them (stored in MongoDB, applied live)
 """
 
 import hmac
@@ -47,6 +49,8 @@ from pymongo.server_api import ServerApi
 import backends
 import model_client
 import session_manager
+import settings_routes
+from app_config import cfg
 
 HERE = Path(__file__).resolve().parent
 
@@ -66,29 +70,37 @@ def _load_dotenv_if_present():
 
 _load_dotenv_if_present()
 
-MONGODB_URI = os.environ.get("MONGODB_URI")
-# Origins must match the browser's Origin header exactly, which never has a
-# trailing slash -- so strip one if it was pasted in.
-ALLOWED_ORIGINS = [
-    o.strip().rstrip("/") for o in os.environ.get("ALLOWED_ORIGINS", "").split(",") if o.strip()
-]
-# Always allow localhost for local dev, in addition to whatever's configured
-ALLOWED_ORIGINS += ["http://localhost:3000", "http://127.0.0.1:3000"]
+MONGODB_URI = os.environ.get("MONGODB_URI")  # bootstrap: can't live in the database it points at
+
+# Always allowed in addition to whatever's configured, for local dev.
+LOCAL_ORIGINS = ["http://localhost:3000", "http://127.0.0.1:3000"]
+
+
+def allowed_origins() -> list[str]:
+    """Read per request so edits to ALLOWED_ORIGINS in the admin panel apply
+    live. Origins must match the browser's Origin header exactly, which never
+    has a trailing slash -- so strip one if it was pasted in."""
+    configured = [
+        o.strip().rstrip("/") for o in (cfg.get("ALLOWED_ORIGINS", "") or "").split(",") if o.strip()
+    ]
+    return configured + LOCAL_ORIGINS
+
 
 if not MONGODB_URI:
     raise RuntimeError("MONGODB_URI is not set (env var or .env file).")
-
-for _name in ("SESSION_BACKEND_URL", "ADMIN_TOKEN"):
-    if not os.environ.get(_name):
-        print(f"WARNING: env var {_name} is not set. See .env.example.", flush=True)
-if backends.dataset_gate_enabled() and not os.environ.get("DATASET_TRIGGER_SECRET"):
-    print("WARNING: DATASET_BACKEND_URL is set but DATASET_TRIGGER_SECRET is not.", flush=True)
 
 DB_NAME = "kplc_chatbot"
 TOP_K = 3
 
 client = MongoClient(MONGODB_URI, server_api=ServerApi("1"))
 db = client[DB_NAME]
+cfg.bind(db)  # overrides edited in the admin panel live in this database
+
+for _name in ("SESSION_BACKEND_URL", "ADMIN_TOKEN"):
+    if not cfg.get(_name):
+        print(f"WARNING: {_name} is not set (env var or admin panel). See .env.example.", flush=True)
+if backends.dataset_gate_enabled() and not cfg.get("DATASET_TRIGGER_SECRET"):
+    print("WARNING: DATASET_BACKEND_URL is set but DATASET_TRIGGER_SECRET is not.", flush=True)
 
 SYSTEM_PROMPT_TEMPLATE = (HERE / "system_prompt.md").read_text()
 
@@ -146,9 +158,17 @@ async def lifespan(_app: FastAPI):
 # --- app setup ---
 app = FastAPI(title="Kenya Power Chatbot Gateway", lifespan=lifespan)
 
+class DynamicCORSMiddleware(CORSMiddleware):
+    """CORSMiddleware whose origin list is re-read on every request, so
+    ALLOWED_ORIGINS can be changed from the admin panel without a restart."""
+
+    def is_allowed_origin(self, origin: str) -> bool:
+        return origin in allowed_origins()
+
+
 app.add_middleware(
-    CORSMiddleware,
-    allow_origins=ALLOWED_ORIGINS,
+    DynamicCORSMiddleware,
+    allow_origins=LOCAL_ORIGINS,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -158,7 +178,7 @@ app.add_middleware(
 def require_admin(x_admin_token: str | None = Header(default=None)):
     """Guards everything that reads logs or edits the knowledge base. Fails
     closed: with no ADMIN_TOKEN configured, admin endpoints are off."""
-    expected = os.environ.get("ADMIN_TOKEN", "")
+    expected = cfg.get("ADMIN_TOKEN", "") or ""
     if not expected:
         raise HTTPException(
             status_code=503,
@@ -314,3 +334,7 @@ def embed_chunks(force: bool = False):
 @app.get("/chat_logs", dependencies=[Depends(require_admin)])
 def get_chat_logs(limit: int = Query(50, ge=1, le=500)):
     return list(db["chat_logs"].find({}, {"_id": 0}).sort("timestamp", -1).limit(limit))
+
+
+# --- admin: environment variables (all services) ---
+app.include_router(settings_routes.build_router(db, require_admin))

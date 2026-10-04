@@ -57,6 +57,9 @@ def reset(main_mod):
     main_mod.db["session_state"].delete_many({})
     main_mod.db["chat_logs"].delete_many({})
     main_mod.db["chunks"].delete_many({})
+    main_mod.db["service_settings"].delete_many({})
+    from app_config import cfg
+    cfg.invalidate()
     os.environ["SESSION_BACKEND_URL"] = f"http://127.0.0.1:{SESSION_PORT}"
     os.environ["ADMIN_TOKEN"] = "admin-tok"
     yield

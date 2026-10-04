@@ -42,11 +42,33 @@ restart or sleep can't lose a start request.
 | `main.py` | FastAPI app: endpoints, CORS, admin auth, retrieval, chat |
 | `session_manager.py` | Start-demo orchestration (dataset gate → session start) |
 | `backends.py` | HTTP clients for the session backend and dataset backend |
+| `settings_catalog.py` | Every env var of every service (type, default, secret, when it applies) + validation |
+| `settings_routes.py` | `GET /settings`, `PUT /settings/{service}` for the admin panel's Environment tab |
+| `app_config.py`, `runtime_config.py` | Settings lookup: admin-panel override → env var → default (shared code, same file in every Python service) |
 | `model_client.py` | `generate()` / `embed()`, via the session backend |
 | `system_prompt.md` | System prompt with the `{{KNOWLEDGE_BASE}}` placeholder |
 | `API.md` | **Endpoint contract for the two frontends** |
 | `render.yaml` | Optional Render Blueprint |
-| `tests/` | 31 tests against fake versions of both backends (`pytest tests`) |
+| `tests/` | 60 tests against fake versions of both backends (`pytest tests`) |
+
+## Editing environment variables from the admin panel
+
+The admin panel's **Environment** tab edits the variables of every service
+(gateway, session backend, dataset backend, KB builder). Edits are stored in
+MongoDB (`kplc_chatbot.service_settings`, one document per service) and each
+service re-reads them every ~10 s, so no redeploy is needed.
+
+- **Precedence:** panel override → real environment variable → built-in default.
+  *Reset to env* in the panel deletes the override.
+- **Still real env vars:** `MONGODB_URI` (it is how a service finds the database), `MONGODB_DB`
+  on the dataset backend, `PYTHON_VERSION`. The panel shows them read-only.
+- **Every Python service needs `MONGODB_URI`** (the same cluster) so it can read its settings,
+  including the session backend, which had no database before. If MongoDB is unreachable it keeps
+  the last known values, or falls back to plain env vars.
+- **Secrets are shown in full** to anyone holding `ADMIN_TOKEN`, and are stored unencrypted in
+  Atlas. Treat `ADMIN_TOKEN` (and Atlas access) as the key to every service.
+- **Locked out?** Delete the key from `values` of that service's document in Atlas (or unset the
+  override), and the real env var applies again.
 
 ## Deploy on Render
 

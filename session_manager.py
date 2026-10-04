@@ -27,10 +27,10 @@ every GET /session/status re-checks the dataset and, the moment it's ready,
 starts the session. The frontend is polling anyway.
 """
 
-import os
 from datetime import datetime, timedelta, timezone
 
 import backends
+from app_config import cfg
 
 SESSION_DOC_ID = "session"
 
@@ -74,7 +74,7 @@ def _set(db, **fields) -> None:
 
 def _pending_max() -> timedelta:
     # The dataset backend gives up after 90 min by default; don't outlive it.
-    return timedelta(minutes=int(os.environ.get("DATASET_PENDING_MAX_MINUTES", "100")))
+    return timedelta(minutes=cfg.get_int("DATASET_PENDING_MAX_MINUTES", 100))
 
 
 def _claim_pending(db) -> bool:
